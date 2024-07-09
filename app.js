@@ -1,6 +1,5 @@
-/////// app.js
-
 const express = require("express");
+const bcrypt = require("bcryptjs");
 const path = require("path");
 const config = require("./config");
 const session = require("express-session");
@@ -35,7 +34,9 @@ passport.use(
       if (!user) {
         return done(null, false, { message: "Incorrect username" });
       }
-      if (user.password !== password) {
+      const match = await bcrypt.compare(password, user.password);
+      if (!match) {
+        // passwords do not match!
         return done(null, false, { message: "Incorrect password" });
       }
       return done(null, user);
@@ -65,6 +66,10 @@ app.set("view engine", "ejs");
 app.use(session({ secret: "cats", resave: false, saveUninitialized: true }));
 app.use(passport.session());
 app.use(express.urlencoded({ extended: false }));
+app.use((req, res, next) => {
+  res.locals.currentUser = req.user;
+  next();
+});
 
 app.get("/", (req, res) => {
   res.render("index", { user: req.user });
@@ -79,17 +84,24 @@ app.get("/log-out", (req, res, next) => {
   });
 });
 
-app.post("/sign-up", async (req, res, next) => {
-  try {
-    const user = new User({
-      username: req.body.username,
-      password: req.body.password,
-    });
-    const result = await user.save();
-    res.redirect("/");
-  } catch (err) {
-    return next(err);
-  }
+app.post("/sign-up", (req, res, next) => {
+  bcrypt.hash(req.body.password, 10, async (err, hashedPassword) => {
+    if (err) {
+      return next(err); // Handle hashing error
+    }
+
+    try {
+      const user = new User({
+        username: req.body.username,
+        password: hashedPassword, // Store the hashed password
+      });
+
+      await user.save();
+      res.redirect("/");
+    } catch (err) {
+      return next(err);
+    }
+  });
 });
 
 app.post(
